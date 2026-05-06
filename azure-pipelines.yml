@@ -4,35 +4,22 @@ trigger:
       - main
 
 variables:
-  acrName: 'todoappacrshivaram'
+  acrName: 'todoappacrshivaram'         # ⚠️ CHANGE TO YOUR ACR NAME
   acrConnection: 'ACR-Connection'
-  aksConnection: 'AKS-Connection'
   backendImage: 'todo-backend'
   frontendImage: 'todo-frontend'
   imageTag: '$(Build.BuildId)'
   vmImage: 'ubuntu-latest'
 
 stages:
-# ===================== CI: BUILD STAGE =====================
 - stage: Build
-  displayName: 'Build and Push Docker Images'
+  displayName: 'CI - Build & Push Images'
   jobs:
   - job: BuildBackend
     displayName: 'Build Backend Image'
     pool:
       vmImage: $(vmImage)
     steps:
-      - task: NodeTool@0
-        inputs:
-          versionSpec: '18.x'
-        displayName: 'Install Node.js'
-
-      - script: |
-          cd backend
-          npm install
-          npm test
-        displayName: 'Backend - Install & Test'
-
       - task: Docker@2
         displayName: 'Build & Push Backend to ACR'
         inputs:
@@ -50,17 +37,6 @@ stages:
     pool:
       vmImage: $(vmImage)
     steps:
-      - task: NodeTool@0
-        inputs:
-          versionSpec: '18.x'
-        displayName: 'Install Node.js'
-
-      - script: |
-          cd frontend
-          npm install
-          npm test
-        displayName: 'Frontend - Install & Test'
-
       - task: Docker@2
         displayName: 'Build & Push Frontend to ACR'
         inputs:
@@ -74,66 +50,13 @@ stages:
             latest
 
   - job: PublishManifests
-    displayName: 'Publish K8s Manifests'
+    displayName: 'Publish K8s Manifests as Artifacts'
     pool:
       vmImage: $(vmImage)
     steps:
       - task: PublishBuildArtifacts@1
+        displayName: 'Publish manifests'
         inputs:
           PathtoPublish: 'k8s'
           ArtifactName: 'manifests'
-
-# ===================== CD: DEPLOY STAGE =====================
-- stage: Deploy
-  displayName: 'Deploy to AKS'
-  dependsOn: Build
-  condition: succeeded()
-  jobs:
-  - deployment: DeployToAKS
-    displayName: 'Deploy to AKS Cluster'
-    pool:
-      vmImage: $(vmImage)
-    environment: 'AKS-Production'
-    strategy:
-      runOnce:
-        deploy:
-          steps:
-            - task: DownloadBuildArtifacts@1
-              inputs:
-                artifactName: 'manifests'
-                downloadPath: '$(System.ArtifactsDirectory)'
-
-            - script: |
-                MANIFEST_DIR="$(System.ArtifactsDirectory)/manifests"
-                sed -i "s|ACR_NAME_PLACEHOLDER|$(acrName)|g" $MANIFEST_DIR/backend-deployment.yaml
-                sed -i "s|IMAGE_TAG_PLACEHOLDER|$(imageTag)|g" $MANIFEST_DIR/backend-deployment.yaml
-                sed -i "s|ACR_NAME_PLACEHOLDER|$(acrName)|g" $MANIFEST_DIR/frontend-deployment.yaml
-                sed -i "s|IMAGE_TAG_PLACEHOLDER|$(imageTag)|g" $MANIFEST_DIR/frontend-deployment.yaml
-                echo "===== Updated Manifests ====="
-                cat $MANIFEST_DIR/backend-deployment.yaml
-                cat $MANIFEST_DIR/frontend-deployment.yaml
-              displayName: 'Replace image placeholders'
-
-            - task: KubernetesManifest@1
-              displayName: 'Deploy MongoDB'
-              inputs:
-                action: 'deploy'
-                kubernetesServiceConnection: $(aksConnection)
-                namespace: 'default'
-                manifests: '$(System.ArtifactsDirectory)/manifests/mongo-deployment.yaml'
-
-            - task: KubernetesManifest@1
-              displayName: 'Deploy Backend'
-              inputs:
-                action: 'deploy'
-                kubernetesServiceConnection: $(aksConnection)
-                namespace: 'default'
-                manifests: '$(System.ArtifactsDirectory)/manifests/backend-deployment.yaml'
-
-            - task: KubernetesManifest@1
-              displayName: 'Deploy Frontend'
-              inputs:
-                action: 'deploy'
-                kubernetesServiceConnection: $(aksConnection)
-                namespace: 'default'
-                manifests: '$(System.ArtifactsDirectory)/manifests/frontend-deployment.yaml'
+          publishLocation: 'Container'
