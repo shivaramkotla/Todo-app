@@ -4,8 +4,7 @@ trigger:
       - main
 
 variables:
-  # IMPORTANT: Replace these values with yours
-  acrName: 'REPLACE_WITH_YOUR_ACR_NAME'
+  acrName: 'todoappacrshivaram'
   acrConnection: 'ACR-Connection'
   aksConnection: 'AKS-Connection'
   backendImage: 'todo-backend'
