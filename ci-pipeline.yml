@@ -1,7 +1,4 @@
-trigger:
-  branches:
-    include:
-      - main
+
 
 variables:
   acrName: 'todoappacrshivaram'         # ⚠️ CHANGE TO YOUR ACR NAME
