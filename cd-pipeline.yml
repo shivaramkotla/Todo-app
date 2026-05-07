@@ -1,25 +1,21 @@
-# CD Pipeline - Deploy to AKS
-# Triggered automatically after CI Pipeline succeeds
+# CD Pipeline - Triggered by successful CI Pipeline
+trigger: none  # Don't trigger on code commit
+pr: none       # Don't trigger on pull requests
 
-trigger: none  # Don't trigger on code commits
-
-# Trigger when CI pipeline completes
+# Trigger ONLY when CI pipeline completes successfully
 resources:
   pipelines:
-    - pipeline: ci-pipeline
-      source: 'shivaramkotla.Todo-app'  # ⚠️ Your CI pipeline NAME (in DevOps)
+    - pipeline: CI_Pipeline                              # Local alias (any name)
+      source: 'shivaramkotla.Todo-app'                   # ✅ Your CI pipeline name
       trigger:
         branches:
           include:
             - main
 
 variables:
-  acrName: 'todoappacrshivaram'         # ⚠️ Your ACR name
-  aksConnection: 'AKS-Connection'       # AKS service connection name
-  imageTag: '$(resources.pipeline.ci-pipeline.runID)'
-
-pool:
-  vmImage: 'ubuntu-latest'
+  acrName: 'todoappacrshivaram'                          # ⚠️ Update if your ACR name is different
+  aksConnection: 'AKS-Connection'                        # Your AKS service connection name
+  imageTag: '$(resources.pipeline.CI_Pipeline.runID)'
 
 stages:
 - stage: Deploy
@@ -27,58 +23,74 @@ stages:
   jobs:
   - deployment: DeployToAKS
     displayName: 'Deploy to AKS Cluster'
+    pool:
+      vmImage: 'ubuntu-latest'
     environment: 'AKS-Production'
     strategy:
       runOnce:
         deploy:
           steps:
-            # Download artifact from CI pipeline
-            - download: ci-pipeline
+            # Step 1: Download manifests from CI pipeline
+            - download: CI_Pipeline
               artifact: manifests
-              displayName: 'Download manifests from CI'
-            
-            # Update placeholders with real values
-            - bash: |
-                MANIFEST_DIR="$(Pipeline.Workspace)/ci-pipeline/manifests"
-                echo "Looking in: $MANIFEST_DIR"
+              displayName: 'Download manifests artifact'
+
+            # Step 2: Update image placeholders with real values
+            - script: |
+                MANIFEST_DIR="$(Pipeline.Workspace)/CI_Pipeline/manifests"
+                echo "===== Looking in: $MANIFEST_DIR ====="
                 ls -la $MANIFEST_DIR
                 
-                # Replace placeholders
+                # Replace placeholders in backend manifest
                 sed -i "s|ACR_NAME_PLACEHOLDER|$(acrName)|g" $MANIFEST_DIR/backend-deployment.yaml
                 sed -i "s|IMAGE_TAG_PLACEHOLDER|$(imageTag)|g" $MANIFEST_DIR/backend-deployment.yaml
+                
+                # Replace placeholders in frontend manifest
                 sed -i "s|ACR_NAME_PLACEHOLDER|$(acrName)|g" $MANIFEST_DIR/frontend-deployment.yaml
                 sed -i "s|IMAGE_TAG_PLACEHOLDER|$(imageTag)|g" $MANIFEST_DIR/frontend-deployment.yaml
                 
-                echo "===== Updated Backend ====="
+                echo "===== Updated Backend Manifest ====="
                 cat $MANIFEST_DIR/backend-deployment.yaml
                 echo ""
-                echo "===== Updated Frontend ====="
+                echo "===== Updated Frontend Manifest ====="
                 cat $MANIFEST_DIR/frontend-deployment.yaml
               displayName: 'Update image placeholders'
-            
-            # Deploy MongoDB
+
+            # Step 3: Deploy MongoDB (database first!)
             - task: KubernetesManifest@1
               displayName: 'Deploy MongoDB'
               inputs:
                 action: 'deploy'
                 kubernetesServiceConnection: $(aksConnection)
                 namespace: 'default'
-                manifests: '$(Pipeline.Workspace)/ci-pipeline/manifests/mongo-deployment.yaml'
-            
-            # Deploy Backend
+                manifests: '$(Pipeline.Workspace)/CI_Pipeline/manifests/mongo-deployment.yaml'
+
+            # Step 4: Deploy Backend (depends on MongoDB)
             - task: KubernetesManifest@1
               displayName: 'Deploy Backend'
               inputs:
                 action: 'deploy'
                 kubernetesServiceConnection: $(aksConnection)
                 namespace: 'default'
-                manifests: '$(Pipeline.Workspace)/ci-pipeline/manifests/backend-deployment.yaml'
-            
-            # Deploy Frontend
+                manifests: '$(Pipeline.Workspace)/CI_Pipeline/manifests/backend-deployment.yaml'
+
+            # Step 5: Deploy Frontend (depends on Backend)
             - task: KubernetesManifest@1
               displayName: 'Deploy Frontend'
               inputs:
                 action: 'deploy'
                 kubernetesServiceConnection: $(aksConnection)
                 namespace: 'default'
-                manifests: '$(Pipeline.Workspace)/ci-pipeline/manifests/frontend-deployment.yaml'
+                manifests: '$(Pipeline.Workspace)/CI_Pipeline/manifests/frontend-deployment.yaml'
+
+            # Step 6: Show deployment summary
+            - script: |
+                echo "===== Deployment Complete! ====="
+                echo "✅ MongoDB deployed"
+                echo "✅ Backend deployed"
+                echo "✅ Frontend deployed"
+                echo ""
+                echo "🌐 Get your app URL:"
+                echo "   Azure Portal → Kubernetes services → todo-aks-cluster → Services and ingresses"
+                echo "   Look for: frontend-service → External IP"
+              displayName: 'Deployment Summary'
