@@ -1,0 +1,84 @@
+# CD Pipeline - Deploy to AKS
+# Triggered automatically after CI Pipeline succeeds
+
+trigger: none  # Don't trigger on code commits
+
+# Trigger when CI pipeline completes
+resources:
+  pipelines:
+    - pipeline: ci-pipeline
+      source: 'shivaramkotla.Todo-app'  # ⚠️ Your CI pipeline NAME (in DevOps)
+      trigger:
+        branches:
+          include:
+            - main
+
+variables:
+  acrName: 'todoappacrshivaram'         # ⚠️ Your ACR name
+  aksConnection: 'AKS-Connection'       # AKS service connection name
+  imageTag: '$(resources.pipeline.ci-pipeline.runID)'
+
+pool:
+  vmImage: 'ubuntu-latest'
+
+stages:
+- stage: Deploy
+  displayName: 'CD - Deploy to AKS'
+  jobs:
+  - deployment: DeployToAKS
+    displayName: 'Deploy to AKS Cluster'
+    environment: 'AKS-Production'
+    strategy:
+      runOnce:
+        deploy:
+          steps:
+            # Download artifact from CI pipeline
+            - download: ci-pipeline
+              artifact: manifests
+              displayName: 'Download manifests from CI'
+            
+            # Update placeholders with real values
+            - bash: |
+                MANIFEST_DIR="$(Pipeline.Workspace)/ci-pipeline/manifests"
+                echo "Looking in: $MANIFEST_DIR"
+                ls -la $MANIFEST_DIR
+                
+                # Replace placeholders
+                sed -i "s|ACR_NAME_PLACEHOLDER|$(acrName)|g" $MANIFEST_DIR/backend-deployment.yaml
+                sed -i "s|IMAGE_TAG_PLACEHOLDER|$(imageTag)|g" $MANIFEST_DIR/backend-deployment.yaml
+                sed -i "s|ACR_NAME_PLACEHOLDER|$(acrName)|g" $MANIFEST_DIR/frontend-deployment.yaml
+                sed -i "s|IMAGE_TAG_PLACEHOLDER|$(imageTag)|g" $MANIFEST_DIR/frontend-deployment.yaml
+                
+                echo "===== Updated Backend ====="
+                cat $MANIFEST_DIR/backend-deployment.yaml
+                echo ""
+                echo "===== Updated Frontend ====="
+                cat $MANIFEST_DIR/frontend-deployment.yaml
+              displayName: 'Update image placeholders'
+            
+            # Deploy MongoDB
+            - task: KubernetesManifest@1
+              displayName: 'Deploy MongoDB'
+              inputs:
+                action: 'deploy'
+                kubernetesServiceConnection: $(aksConnection)
+                namespace: 'default'
+                manifests: '$(Pipeline.Workspace)/ci-pipeline/manifests/mongo-deployment.yaml'
+            
+            # Deploy Backend
+            - task: KubernetesManifest@1
+              displayName: 'Deploy Backend'
+              inputs:
+                action: 'deploy'
+                kubernetesServiceConnection: $(aksConnection)
+                namespace: 'default'
+                manifests: '$(Pipeline.Workspace)/ci-pipeline/manifests/backend-deployment.yaml'
+            
+            # Deploy Frontend
+            - task: KubernetesManifest@1
+              displayName: 'Deploy Frontend'
+              inputs:
+                action: 'deploy'
+                kubernetesServiceConnection: $(aksConnection)
+                namespace: 'default'
+                manifests: '$(Pipeline.Workspace)/ci-pipeline/manifests/frontend-deployment.yaml'
